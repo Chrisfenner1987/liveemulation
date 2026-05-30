@@ -27,7 +27,9 @@ if(APPLE)
     endif()
 else()
     if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
-        set(CMAKE_CUDA_ARCHITECTURES "all-major")   # Maxwell..latest; CMake >= 3.23
+        # Explicit list (the "all-major" keyword is NOT expanded by the VS generator).
+        # 52=Maxwell 61=Pascal(10xx) 75=Turing(16/20xx) 86=Ampere(30xx) 89=Ada(40xx).
+        set(CMAKE_CUDA_ARCHITECTURES "52;61;75;86;89")
     endif()
     enable_language(CUDA)
     find_package(CUDAToolkit REQUIRED)
@@ -61,8 +63,9 @@ if(APPLE)
     target_link_libraries(FilmGrain PRIVATE "-framework Metal" "-framework Foundation" "-framework AppKit")
 else()
     target_compile_definitions(FilmGrain PRIVATE FILMGRAIN_CUDA)
-    set_target_properties(FilmGrain PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-    # FilmGrainCuda.h / processImagesCuda live in the .cpp too -> it needs FILMGRAIN_CUDA (set above).
+    # Single .cu, no cross-TU device calls -> separable compilation not needed
+    # (and its extra device-link step can fail on some toolchains).
+    set_target_properties(FilmGrain PROPERTIES CUDA_SEPARABLE_COMPILATION OFF)
     target_link_libraries(FilmGrain PRIVATE CUDA::cudart)
 endif()
 

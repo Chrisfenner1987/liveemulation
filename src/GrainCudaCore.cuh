@@ -16,9 +16,10 @@
   #include <math.h>   // host build: expf/logf/sqrtf/floorf in the global namespace
 #endif
 
-static const float kPI = 3.14159265358979323846f;
-static const float kKernelSupport = 2.2f;   // R = kKernelSupport * grainRadius
-static const float kCoarseScale   = 2.5f;   // coarse octave radius multiplier
+// constexpr so they are usable in __device__ code without nvcc host-variable warnings.
+constexpr float kPI = 3.14159265358979323846f;
+constexpr float kKernelSupport = 2.2f;   // R = kKernelSupport * grainRadius
+constexpr float kCoarseScale   = 2.5f;   // coarse octave radius multiplier
 
 FG_CONST float c_gainLUT[64];                // gain LUT (kGainLUTSize entries used)
 

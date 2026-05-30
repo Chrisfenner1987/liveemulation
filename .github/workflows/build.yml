@@ -1,0 +1,104 @@
+name: Build FilmGrain OFX
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # Pinned OpenFX SDK commit the plugin is built/tested against.
+  OPENFX_COMMIT: aebd4e43a62d55ee962669cea8c48ee65dc4d2e2
+
+jobs:
+  # ---------------------------------------------------------------- Windows (CUDA)
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch OpenFX SDK (pinned)
+        shell: bash
+        run: |
+          git clone https://github.com/AcademySoftwareFoundation/openfx.git
+          git -C openfx checkout "$OPENFX_COMMIT"
+
+      - name: Install CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.21
+        with:
+          cuda: '12.5.0'
+          method: 'network'
+          sub-packages: '["nvcc", "cudart", "visual_studio_integration"]'
+
+      - name: Configure
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Upload Win64 binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: win64-ofx
+          path: build/FilmGrain.ofx.bundle/Contents/Win64/FilmGrain.ofx
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- macOS (Metal)
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch OpenFX SDK (pinned)
+        run: |
+          git clone https://github.com/AcademySoftwareFoundation/openfx.git
+          git -C openfx checkout "$OPENFX_COMMIT"
+
+      - name: Build (universal arm64 + x86_64)
+        run: make
+
+      - name: Ad-hoc sign
+        run: codesign --force --deep --sign - FilmGrain.ofx.bundle
+
+      - name: Upload macOS binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-ofx
+          path: FilmGrain.ofx.bundle/Contents/MacOS/FilmGrain.ofx
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------- Package
+  package:
+    needs: [ windows, macos ]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: win64-ofx, path: artifacts/win64 }
+      - uses: actions/download-artifact@v4
+        with: { name: macos-ofx, path: artifacts/macos }
+
+      - name: Assemble universal bundle + installers
+        shell: bash
+        run: |
+          OUT="FilmGrain-OFX"
+          B="$OUT/FilmGrain.ofx.bundle"
+          mkdir -p "$B/Contents/Win64" "$B/Contents/MacOS"
+          cp Info.plist "$B/Contents/Info.plist"
+          cp artifacts/macos/FilmGrain.ofx "$B/Contents/MacOS/FilmGrain.ofx"
+          cp artifacts/win64/FilmGrain.ofx "$B/Contents/Win64/FilmGrain.ofx"
+          SRC="dist/FilmGrain-OFX-v1.0"
+          cp "$SRC/Install Film Grain.command"   "$OUT/Install (macOS).command" 2>/dev/null || true
+          cp "$SRC/Uninstall Film Grain.command" "$OUT/Uninstall (macOS).command" 2>/dev/null || true
+          cp "$SRC/Install (Windows).bat"        "$OUT/" 2>/dev/null || true
+          cp "$SRC/READ ME FIRST.txt"            "$OUT/" 2>/dev/null || true
+          cp "$SRC/LICENSE.txt"                  "$OUT/" 2>/dev/null || true
+          echo "Built universal bundle:"; find "$OUT" -type f
+
+      - name: Upload universal package
+        uses: actions/upload-artifact@v4
+        with:
+          name: FilmGrain-OFX-universal
+          path: FilmGrain-OFX
+          if-no-files-found: error
