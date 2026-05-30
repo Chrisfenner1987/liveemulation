@@ -1,0 +1,26 @@
+# Vendored OFX SDK - fetched by CI / local script, pinned in the workflow.
+/openfx/
+
+# Build outputs
+/build/
+build/
+*.o
+*.ofx
+FilmGrain.ofx.bundle/
+dist/**/FilmGrain.ofx.bundle/
+dist/*.zip
+
+# Local tool binaries
+/grain_test
+/calib_field
+/extract_frames
+
+# Large / generated analysis data (derived from the scan)
+analysis/*.bin
+analysis/*.mov
+*.pgm
+*.ppm
+
+# Misc
+.DS_Store
+.github/

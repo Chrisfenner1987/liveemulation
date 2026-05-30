@@ -1,0 +1,70 @@
+FILM GRAIN (Stochastic) - OFX plugin  -  v1.0  (macOS, test build)
+====================================================================
+
+A physically-based film-grain plugin with optional halation, tuned to
+Kodak Vision3 500T. Works in DaVinci Resolve and other OpenFX hosts.
+
+Requirements
+------------
+- macOS (Apple Silicon or Intel - the plugin is universal)
+- DaVinci Resolve (free or Studio) or another OpenFX host
+- ~1 MB disk
+
+
+INSTALL (easy way)
+------------------
+1. Double-click  "Install Film Grain.command".
+
+   First time, macOS may say it's from an unidentified developer and refuse.
+   If so:  RIGHT-CLICK the file  >  Open  >  Open.  (You only do this once.)
+   This build is ad-hoc signed but NOT notarized - that warning is expected
+   for a test build and is safe to bypass.
+
+2. Enter your Mac password when asked (needed to write to the system
+   plug-ins folder).
+
+3. QUIT and REOPEN DaVinci Resolve completely. It only scans for OFX
+   plug-ins when it launches - closing the project is not enough.
+
+4. In the color page, open the OpenFX library and look under the group
+   "Fenner"  >  "Film Grain (Stochastic)".  Drag it onto a clip or node.
+
+
+INSTALL (manual, if you prefer Terminal)
+----------------------------------------
+   sudo cp -R FilmGrain.ofx.bundle /Library/OFX/Plugins/
+   sudo xattr -dr com.apple.quarantine /Library/OFX/Plugins/FilmGrain.ofx.bundle
+Then restart Resolve.
+
+
+QUICK START
+-----------
+- Defaults are calibrated to Super 16 500T (7219) - drop it on and it should
+  look right immediately.
+- FILM FORMAT: switch to "Super 35 (5219)" for finer, cleaner 35mm grain.
+- AMOUNT: overall grain strength (1.0 ~ matches the reference scan).
+- GRAIN SIZE / STRUCTURE: size and large-scale clumping ("depth").
+- COLOR COUPLING: how shared the grain is across R/G/B (high = filmic,
+  less chroma noise).
+- HALATION (collapsed group, OFF by default): the warm red glow around
+  bright lights (CineStill-style). Raise "Halation Intensity" to ~0.3-0.5
+  on a shot with practical lights. If you put the node early in the chain
+  on log/flat footage and see no glow, raise "Highlight Gain" to 2-4.
+
+PERFORMANCE
+-----------
+GPU-accelerated (Metal). If playback is heavy on your machine: lower Quality,
+reduce Grain Structure / Color Coupling, or enable "Monochrome Grain". 4K is
+heavier than 1080p - use Resolve's render cache if needed.
+
+UNINSTALL
+---------
+Double-click "Uninstall Film Grain.command"  (or delete
+/Library/OFX/Plugins/FilmGrain.ofx.bundle), then restart Resolve.
+
+FEEDBACK
+--------
+This is a test build - please report what stock/footage you tried, how it
+looked, and any crashes or load failures.
+
+(c) 2026 Chris Fenner.  See LICENSE.txt.

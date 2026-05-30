@@ -1,0 +1,2 @@
+video 1920x1080 dur=681.375s, extracting 24 frames, crop 512
+wrote 24 frames -> analysis/crop_rgba_f32.bin (crop 512x512, RGBA f32)
