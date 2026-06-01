@@ -21,7 +21,7 @@
 #include "ofxsProcessing.h"
 #include "ofxsLog.h"
 
-#define kPluginName        "Film Grain (Stochastic)"
+#define kPluginName        "Grain Match"
 #define kPluginGrouping    "Fenner"
 #define kPluginDescription \
     "Physically-based film grain via a stochastic silver-halide (Boolean) grain model.\n" \

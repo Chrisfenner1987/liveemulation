@@ -1,4 +1,4 @@
-# Film Grain (Stochastic) — OFX plugin
+# Grain Match — OFX plugin
 
 A physically-based film-grain plugin for OpenFX hosts (DaVinci Resolve, Fusion,
 Nuke, Natron, …). Grain is generated with a **soft-kernel stochastic silver-grain
@@ -165,7 +165,7 @@ sudo cp -R FilmGrain.ofx.bundle /Library/OFX/Plugins/
 ```
 
 Then restart DaVinci Resolve. The effect appears in the OpenFX library under the
-**"Fenner"** group as **"Film Grain (Stochastic)"**.
+**"Fenner"** group as **"Grain Match"**.
 
 ## Validation
 

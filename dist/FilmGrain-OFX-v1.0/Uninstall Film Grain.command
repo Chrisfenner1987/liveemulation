@@ -1,5 +1,5 @@
 #!/bin/bash
-# Film Grain (Stochastic) OFX - macOS uninstaller
+# Grain Match OFX - macOS uninstaller
 BUNDLE="FilmGrain.ofx.bundle"
 echo "Removing /Library/OFX/Plugins/$BUNDLE ..."
 echo "You'll be asked for your Mac password."

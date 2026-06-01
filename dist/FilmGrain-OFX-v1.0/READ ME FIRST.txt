@@ -27,7 +27,7 @@ INSTALL (easy way)
    plug-ins when it launches - closing the project is not enough.
 
 4. In the color page, open the OpenFX library and look under the group
-   "Fenner"  >  "Film Grain (Stochastic)".  Drag it onto a clip or node.
+   "Fenner"  >  "Grain Match".  Drag it onto a clip or node.
 
 
 INSTALL (manual, if you prefer Terminal)
@@ -44,7 +44,7 @@ Requires an NVIDIA GPU for the accelerated path (other GPUs run on CPU).
    (Or manually copy the FilmGrain.ofx.bundle folder into
     C:\Program Files\Common Files\OFX\Plugins\ )
 2. Quit and reopen DaVinci Resolve.
-3. Find it under  OpenFX > Fenner > Film Grain (Stochastic).
+3. Find it under  OpenFX > Fenner > Grain Match.
 
 
 QUICK START

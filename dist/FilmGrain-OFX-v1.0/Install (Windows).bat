@@ -1,11 +1,11 @@
 @echo off
-REM Film Grain (Stochastic) OFX - Windows installer.
+REM Grain Match OFX - Windows installer.
 REM RIGHT-CLICK this file and choose "Run as administrator".
 setlocal
 set "DEST=C:\Program Files\Common Files\OFX\Plugins"
 
 echo ===============================================
-echo  Film Grain (Stochastic) - OFX plugin installer
+echo  Grain Match - OFX plugin installer
 echo ===============================================
 echo.
 

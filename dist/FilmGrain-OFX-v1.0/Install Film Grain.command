@@ -1,11 +1,11 @@
 #!/bin/bash
-# Film Grain (Stochastic) OFX - macOS installer
+# Grain Match OFX - macOS installer
 BUNDLE="FilmGrain.ofx.bundle"
 DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC="$DIR/$BUNDLE"
 
 echo "==============================================="
-echo " Film Grain (Stochastic) - OFX plugin installer"
+echo " Grain Match - OFX plugin installer"
 echo "==============================================="
 echo
 
@@ -30,7 +30,7 @@ if [ $? -eq 0 ]; then
   echo
   echo "Installed successfully."
   echo "Now QUIT and REOPEN DaVinci Resolve (it scans OFX plugins only at launch)."
-  echo "Find it under:  OpenFX  >  Fenner  >  Film Grain (Stochastic)"
+  echo "Find it under:  OpenFX  >  Fenner  >  Grain Match"
 else
   echo
   echo "Install was cancelled or failed."
