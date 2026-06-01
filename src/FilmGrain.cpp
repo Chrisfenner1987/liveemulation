@@ -631,22 +631,16 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
     mono->setDefault(false);
     page->addChild(*mono);
 
-    // ================= GRAIN OPTIONS (secondary grain settings) =================
-    GroupParamDescriptor* opts = p_Desc.defineGroupParam("grainOptions");
-    opts->setLabels("Grain Options", "Grain Options", "Grain Options");
-    opts->setHint("Secondary grain settings: tonal response, size variation, and render quality.");
-    opts->setOpen(false);
-
+    // Secondary grain settings, kept top-level (under Monochrome Grain).
     BooleanParamDescriptor* matchCurve = p_Desc.defineBooleanParam("matchCurve");
     matchCurve->setLabels("Match 500T Curve", "Match 500T Curve", "Match 500T Curve");
     matchCurve->setHint("Drive grain strength by the measured 500T grain-vs-exposure curve (U-shaped: stronger in shadow/highlight). Off = uniform grain across all levels.");
     matchCurve->setDefault(true);
-    matchCurve->setParent(*opts);
     page->addChild(*matchCurve);
 
     DoubleParamDescriptor* irreg = defineDouble(p_Desc, "irregularity", "Irregularity",
         "Spread of the grain-size distribution (0 = uniform discs, higher = log-normal mix). Note: values > 0 are noticeably slower (per-grain size sampling).",
-        0.0, 0.0, 1.0, 0.0, 1.0, opts);
+        0.0, 0.0, 1.0, 0.0, 1.0, nullptr);
     page->addChild(*irreg);
 
     IntParamDescriptor* quality = p_Desc.defineIntParam("quality");
@@ -655,7 +649,6 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
     quality->setDefault(1);
     quality->setRange(1, 16);
     quality->setDisplayRange(1, 9);
-    quality->setParent(*opts);
     page->addChild(*quality);
 
     // ================= GRAIN MOTION =================
