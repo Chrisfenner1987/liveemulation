@@ -649,6 +649,43 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
         0.75, 0.0, 1.0, 0.0, 1.0, nullptr);
     page->addChild(*coupling);
 
+    // --- Grain Motion: temporal behavior of the grain (its own group). ---
+    GroupParamDescriptor* motionG = p_Desc.defineGroupParam("grainMotion");
+    motionG->setLabels("Grain Motion", "Grain Motion", "Grain Motion");
+    motionG->setHint("How the grain pattern moves over time: amount, cadence, and seed.");
+    motionG->setOpen(false);
+
+    BooleanParamDescriptor* animate = p_Desc.defineBooleanParam("animate");
+    animate->setLabels("Animate", "Animate", "Animate");
+    animate->setHint("Master switch for grain movement. Off = static grain plate (Motion Amount / Frame Hold ignored).");
+    animate->setDefault(true);
+    animate->setParent(*motionG);
+    page->addChild(*animate);
+
+    DoubleParamDescriptor* motion = defineDouble(p_Desc, "motionAmount", "Motion Amount",
+        "How much the grain moves frame to frame: 0 = static plate, 1 = fully re-randomized each (held) frame. "
+        "Values between blend a static base with moving grain for a calmer 'boil'. (Animate must be on.)",
+        1.0, 0.0, 1.0, 0.0, 1.0, motionG);
+    page->addChild(*motion);
+
+    IntParamDescriptor* frameHold = p_Desc.defineIntParam("frameHold");
+    frameHold->setLabels("Frame Hold", "Frame Hold", "Frame Hold");
+    frameHold->setHint("Hold each grain pattern for N frames before it changes. 1 = new grain every frame (on ones); 2 = on twos; 3 = on threes (classic film cadence).");
+    frameHold->setDefault(1);
+    frameHold->setRange(1, 24);
+    frameHold->setDisplayRange(1, 6);
+    frameHold->setParent(*motionG);
+    page->addChild(*frameHold);
+
+    IntParamDescriptor* seed = p_Desc.defineIntParam("seed");
+    seed->setLabels("Seed", "Seed", "Seed");
+    seed->setHint("Base random seed for the grain pattern.");
+    seed->setDefault(2026);
+    seed->setRange(0, 1000000);
+    seed->setDisplayRange(0, 9999);
+    seed->setParent(*motionG);
+    page->addChild(*seed);
+
     // --- Halation: warm highlight glow from light reflecting off the film base
     // (the effect anti-halation layers suppress; pronounced in rem-jet-removed
     // 500T, i.e. CineStill 800T). Extract highlights -> blur -> tint -> screen. ---
@@ -680,34 +717,6 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
     halTint->setDefault(1.0, 0.30, 0.15);
     halTint->setParent(*hal);
     page->addChild(*halTint);
-
-    BooleanParamDescriptor* animate = p_Desc.defineBooleanParam("animate");
-    animate->setLabels("Animate", "Animate", "Animate");
-    animate->setHint("Master switch for grain movement. Off = static grain plate (Motion Amount / Frame Hold ignored).");
-    animate->setDefault(true);
-    page->addChild(*animate);
-
-    DoubleParamDescriptor* motion = defineDouble(p_Desc, "motionAmount", "Motion Amount",
-        "How much the grain moves frame to frame: 0 = static plate, 1 = fully re-randomized each (held) frame. "
-        "Values between blend a static base with moving grain for a calmer 'boil'. (Animate must be on.)",
-        1.0, 0.0, 1.0, 0.0, 1.0, nullptr);
-    page->addChild(*motion);
-
-    IntParamDescriptor* frameHold = p_Desc.defineIntParam("frameHold");
-    frameHold->setLabels("Frame Hold", "Frame Hold", "Frame Hold");
-    frameHold->setHint("Hold each grain pattern for N frames before it changes. 1 = new grain every frame (on ones); 2 = on twos; 3 = on threes (classic film cadence).");
-    frameHold->setDefault(1);
-    frameHold->setRange(1, 24);
-    frameHold->setDisplayRange(1, 6);
-    page->addChild(*frameHold);
-
-    IntParamDescriptor* seed = p_Desc.defineIntParam("seed");
-    seed->setLabels("Seed", "Seed", "Seed");
-    seed->setHint("Base random seed for the grain pattern.");
-    seed->setDefault(2026);
-    seed->setRange(0, 1000000);
-    seed->setDisplayRange(0, 9999);
-    page->addChild(*seed);
 
     GroupParamDescriptor* tonal = p_Desc.defineGroupParam("tonalGrain");
     tonal->setLabels("Tonal Grain Trim", "Tonal Grain Trim", "Tonal Grain Trim");
