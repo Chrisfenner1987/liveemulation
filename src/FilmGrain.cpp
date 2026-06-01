@@ -597,20 +597,15 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
     format->setDefault(0);
     page->addChild(*format);
 
-    // Defaults below are calibrated to a Kodak Vision3 500T grey-card scan
-    // (see analysis/plugin_defaults.json): green grain radius ~1.0px, blue
-    // ~18% coarser & ~20% grainier, red ~5% finer/cleaner. Base amount ~0.04
-    // reproduces the scan's mid-tone grain RMS 1:1 (1080p, at display levels).
+    // Defaults are calibrated to a Kodak Vision3 500T grey-card scan
+    // (analysis/plugin_defaults.json): green grain radius ~0.85px, blue ~18%
+    // coarser & ~20% grainier, red ~5% finer/cleaner.
+    //
+    // ================= PRIMARY CONTROLS (top level) =================
     DoubleParamDescriptor* amount = defineDouble(p_Desc, "amount", "Amount",
         "Overall grain strength. With Match 500T Curve on, 1.0 reproduces the scan's grain at every exposure; raise for a heavier look.",
         1.0, 0.0, 8.0, 0.0, 3.0, nullptr);
     page->addChild(*amount);
-
-    BooleanParamDescriptor* matchCurve = p_Desc.defineBooleanParam("matchCurve");
-    matchCurve->setLabels("Match 500T Curve", "Match 500T Curve", "Match 500T Curve");
-    matchCurve->setHint("Drive grain strength by the measured 500T grain-vs-exposure curve (U-shaped: stronger in shadow/highlight). Off = uniform grain across all levels.");
-    matchCurve->setDefault(true);
-    page->addChild(*matchCurve);
 
     DoubleParamDescriptor* size = defineDouble(p_Desc, "grainSize", "Grain Size",
         "Grain radius in pixels (at full res). 0.85 ~ 500T at 1080p. Smaller = finer/tighter, larger = softer/clumpier.",
@@ -623,9 +618,35 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
         0.35, 0.0, 1.0, 0.0, 1.0, nullptr);
     page->addChild(*structure);
 
+    DoubleParamDescriptor* coupling = defineDouble(p_Desc, "colorCoupling", "Color Coupling",
+        "How correlated the grain is across R/G/B. Real film grain is highly cross-color correlated "
+        "(mostly a shared luminance grain). 1 = monochrome-like (least chroma noise), 0 = fully independent "
+        "RGB grain (most chroma noise). ~0.75 is film-like.",
+        0.75, 0.0, 1.0, 0.0, 1.0, nullptr);
+    page->addChild(*coupling);
+
+    BooleanParamDescriptor* mono = p_Desc.defineBooleanParam("monochrome");
+    mono->setLabels("Monochrome Grain", "Monochrome Grain", "Monochrome Grain");
+    mono->setHint("Drive one luminance grain layer applied to all channels (less chroma noise) instead of independent RGB grain.");
+    mono->setDefault(false);
+    page->addChild(*mono);
+
+    // ================= GRAIN OPTIONS (secondary grain settings) =================
+    GroupParamDescriptor* opts = p_Desc.defineGroupParam("grainOptions");
+    opts->setLabels("Grain Options", "Grain Options", "Grain Options");
+    opts->setHint("Secondary grain settings: tonal response, size variation, and render quality.");
+    opts->setOpen(false);
+
+    BooleanParamDescriptor* matchCurve = p_Desc.defineBooleanParam("matchCurve");
+    matchCurve->setLabels("Match 500T Curve", "Match 500T Curve", "Match 500T Curve");
+    matchCurve->setHint("Drive grain strength by the measured 500T grain-vs-exposure curve (U-shaped: stronger in shadow/highlight). Off = uniform grain across all levels.");
+    matchCurve->setDefault(true);
+    matchCurve->setParent(*opts);
+    page->addChild(*matchCurve);
+
     DoubleParamDescriptor* irreg = defineDouble(p_Desc, "irregularity", "Irregularity",
         "Spread of the grain-size distribution (0 = uniform discs, higher = log-normal mix). Note: values > 0 are noticeably slower (per-grain size sampling).",
-        0.0, 0.0, 1.0, 0.0, 1.0, nullptr);
+        0.0, 0.0, 1.0, 0.0, 1.0, opts);
     page->addChild(*irreg);
 
     IntParamDescriptor* quality = p_Desc.defineIntParam("quality");
@@ -634,22 +655,10 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
     quality->setDefault(1);
     quality->setRange(1, 16);
     quality->setDisplayRange(1, 9);
+    quality->setParent(*opts);
     page->addChild(*quality);
 
-    BooleanParamDescriptor* mono = p_Desc.defineBooleanParam("monochrome");
-    mono->setLabels("Monochrome Grain", "Monochrome Grain", "Monochrome Grain");
-    mono->setHint("Drive one luminance grain layer applied to all channels (less chroma noise) instead of independent RGB grain.");
-    mono->setDefault(false);
-    page->addChild(*mono);
-
-    DoubleParamDescriptor* coupling = defineDouble(p_Desc, "colorCoupling", "Color Coupling",
-        "How correlated the grain is across R/G/B. Real film grain is highly cross-color correlated "
-        "(mostly a shared luminance grain). 1 = monochrome-like (least chroma noise), 0 = fully independent "
-        "RGB grain (most chroma noise). ~0.75 is film-like.",
-        0.75, 0.0, 1.0, 0.0, 1.0, nullptr);
-    page->addChild(*coupling);
-
-    // --- Grain Motion: temporal behavior of the grain (its own group). ---
+    // ================= GRAIN MOTION =================
     GroupParamDescriptor* motionG = p_Desc.defineGroupParam("grainMotion");
     motionG->setLabels("Grain Motion", "Grain Motion", "Grain Motion");
     motionG->setHint("How the grain pattern moves over time: amount, cadence, and seed.");
@@ -686,9 +695,33 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
     seed->setParent(*motionG);
     page->addChild(*seed);
 
-    // --- Halation: warm highlight glow from light reflecting off the film base
-    // (the effect anti-halation layers suppress; pronounced in rem-jet-removed
-    // 500T, i.e. CineStill 800T). Extract highlights -> blur -> tint -> screen. ---
+    // ================= TONAL GRAIN TRIM =================
+    GroupParamDescriptor* tonal = p_Desc.defineGroupParam("tonalGrain");
+    tonal->setLabels("Tonal Grain Trim", "Tonal Grain Trim", "Tonal Grain Trim");
+    tonal->setHint("Multiply grain strength in the shadows / mid-tones / highlights. Blended smoothly across the tonal range.");
+    tonal->setOpen(false);
+    page->addChild(*defineDouble(p_Desc, "trimShadow", "Shadow Grain", "Grain multiplier in the shadows.",   1.0, 0.0, 4.0, 0.0, 2.0, tonal));
+    page->addChild(*defineDouble(p_Desc, "trimMid",    "Mid Grain",    "Grain multiplier in the mid-tones.", 1.0, 0.0, 4.0, 0.0, 2.0, tonal));
+    page->addChild(*defineDouble(p_Desc, "trimHigh",   "Highlight Grain", "Grain multiplier in the highlights.", 1.0, 0.0, 4.0, 0.0, 2.0, tonal));
+
+    // ================= PER-CHANNEL (RGB) =================
+    GroupParamDescriptor* perCh = p_Desc.defineGroupParam("perChannel");
+    perCh->setLabels("Per-Channel (RGB)", "Per-Channel (RGB)", "Per-Channel (RGB)");
+    perCh->setHint("Independent grain strength and size per channel. Real film grain differs between dye layers.");
+    perCh->setOpen(false);
+
+    // 500T-calibrated per-channel balance (G normalized to 1).
+    page->addChild(*defineDouble(p_Desc, "amountR", "Red Amount",   "Red-channel grain strength multiplier.",   0.947, 0.0, 4.0, 0.0, 2.0, perCh));
+    page->addChild(*defineDouble(p_Desc, "amountG", "Green Amount", "Green-channel grain strength multiplier.", 1.000, 0.0, 4.0, 0.0, 2.0, perCh));
+    page->addChild(*defineDouble(p_Desc, "amountB", "Blue Amount",  "Blue-channel grain strength multiplier.",  1.202, 0.0, 4.0, 0.0, 2.0, perCh));
+    page->addChild(*defineDouble(p_Desc, "sizeR",   "Red Size",     "Red-channel grain size multiplier.",       0.957, 0.25, 4.0, 0.5, 2.0, perCh));
+    page->addChild(*defineDouble(p_Desc, "sizeG",   "Green Size",   "Green-channel grain size multiplier.",     1.000, 0.25, 4.0, 0.5, 2.0, perCh));
+    page->addChild(*defineDouble(p_Desc, "sizeB",   "Blue Size",    "Blue-channel grain size multiplier.",      1.178, 0.25, 4.0, 0.5, 2.0, perCh));
+
+    // ================= HALATION (optical effect, last) =================
+    // Warm highlight glow from light reflecting off the film base (the effect
+    // anti-halation layers suppress; pronounced in rem-jet-removed 500T = CineStill
+    // 800T). Extract highlights -> blur -> tint -> screen, before grain.
     GroupParamDescriptor* hal = p_Desc.defineGroupParam("halationGroup");
     hal->setLabels("Halation", "Halation", "Halation");
     hal->setHint("Warm highlight glow from light reflecting off the film base (CineStill-style, rem-jet-removed 500T).");
@@ -717,27 +750,6 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
     halTint->setDefault(1.0, 0.30, 0.15);
     halTint->setParent(*hal);
     page->addChild(*halTint);
-
-    GroupParamDescriptor* tonal = p_Desc.defineGroupParam("tonalGrain");
-    tonal->setLabels("Tonal Grain Trim", "Tonal Grain Trim", "Tonal Grain Trim");
-    tonal->setHint("Multiply grain strength in the shadows / mid-tones / highlights. Blended smoothly across the tonal range.");
-    tonal->setOpen(false);
-    page->addChild(*defineDouble(p_Desc, "trimShadow", "Shadow Grain", "Grain multiplier in the shadows.",   1.0, 0.0, 4.0, 0.0, 2.0, tonal));
-    page->addChild(*defineDouble(p_Desc, "trimMid",    "Mid Grain",    "Grain multiplier in the mid-tones.", 1.0, 0.0, 4.0, 0.0, 2.0, tonal));
-    page->addChild(*defineDouble(p_Desc, "trimHigh",   "Highlight Grain", "Grain multiplier in the highlights.", 1.0, 0.0, 4.0, 0.0, 2.0, tonal));
-
-    GroupParamDescriptor* perCh = p_Desc.defineGroupParam("perChannel");
-    perCh->setLabels("Per-Channel (RGB)", "Per-Channel (RGB)", "Per-Channel (RGB)");
-    perCh->setHint("Independent grain strength and size per channel. Real film grain differs between dye layers.");
-    perCh->setOpen(false);
-
-    // 500T-calibrated per-channel balance (G normalized to 1).
-    page->addChild(*defineDouble(p_Desc, "amountR", "Red Amount",   "Red-channel grain strength multiplier.",   0.947, 0.0, 4.0, 0.0, 2.0, perCh));
-    page->addChild(*defineDouble(p_Desc, "amountG", "Green Amount", "Green-channel grain strength multiplier.", 1.000, 0.0, 4.0, 0.0, 2.0, perCh));
-    page->addChild(*defineDouble(p_Desc, "amountB", "Blue Amount",  "Blue-channel grain strength multiplier.",  1.202, 0.0, 4.0, 0.0, 2.0, perCh));
-    page->addChild(*defineDouble(p_Desc, "sizeR",   "Red Size",     "Red-channel grain size multiplier.",       0.957, 0.25, 4.0, 0.5, 2.0, perCh));
-    page->addChild(*defineDouble(p_Desc, "sizeG",   "Green Size",   "Green-channel grain size multiplier.",     1.000, 0.25, 4.0, 0.5, 2.0, perCh));
-    page->addChild(*defineDouble(p_Desc, "sizeB",   "Blue Size",    "Blue-channel grain size multiplier.",      1.178, 0.25, 4.0, 0.5, 2.0, perCh));
 }
 
 ImageEffect* FilmGrainFactory::createInstance(OfxImageEffectHandle p_Handle, ContextEnum /*p_Context*/) {
