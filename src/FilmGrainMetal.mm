@@ -212,7 +212,7 @@ kernel void FilmGrainKernel(constant int& p_Width   [[buffer(11)]],
                             constant float* p_SigmaR [[buffer(16)]],
                             constant float* p_Amount [[buffer(17)]],
                             constant int& p_NSamples [[buffer(18)]],
-                            constant uint& p_Seed    [[buffer(19)]],
+                            constant uint& p_SeedStatic [[buffer(19)]],
                             constant int& p_Mono     [[buffer(20)]],
                             constant int& p_MatchCurve [[buffer(21)]],
                             constant float* p_GainLUT  [[buffer(22)]],
@@ -224,6 +224,8 @@ kernel void FilmGrainKernel(constant int& p_Width   [[buffer(11)]],
                             const device float* p_Halo [[buffer(28)]],
                             constant float& p_HalIntensity [[buffer(29)]],
                             constant float* p_HalTint [[buffer(30)]],
+                            constant uint& p_SeedMoving [[buffer(9)]],
+                            constant float& p_Motion [[buffer(10)]],
                             const device float* p_Input [[buffer(0)]],
                             device float* p_Output      [[buffer(8)]],
                             uint2 id [[thread_position_in_grid]]) {
@@ -247,10 +249,20 @@ kernel void FilmGrainKernel(constant int& p_Width   [[buffer(11)]],
     }
 
     float tS = p_Trim[0], tM = p_Trim[1], tH = p_Trim[2];
+
+    // Grain Motion: blend a static-seed pattern and the moving-seed pattern.
+    uint seeds[2]; float wts[2]; int nSeeds;
+    if (p_Motion <= 0.0f)      { nSeeds = 1; seeds[0] = p_SeedStatic; wts[0] = 1.0f; }
+    else if (p_Motion >= 1.0f) { nSeeds = 1; seeds[0] = p_SeedMoving; wts[0] = 1.0f; }
+    else { nSeeds = 2; seeds[0] = p_SeedStatic; wts[0] = sqrt(1.0f - p_Motion * p_Motion);
+                       seeds[1] = p_SeedMoving; wts[1] = p_Motion; }
+
     if (p_Mono != 0) {
         float luma = r0 * 0.2126f + g0 * 0.7152f + b0 * 0.0722f;
         float cl = clamp(luma, 0.0f, 1.0f);
-        float gg = grainFluct(cl, px, py, 0, p_Radius[0], p_SigmaR[0], p_NSamples, p_Seed, p_Structure);
+        float gg = 0.0f;
+        for (int s = 0; s < nSeeds; ++s)
+            gg += wts[s] * grainFluct(cl, px, py, 0, p_Radius[0], p_SigmaR[0], p_NSamples, seeds[s], p_Structure);
         float eg = effectiveGain(p_GainLUT, p_LUTSize, cl, p_MatchCurve, p_FlatScale, tS, tM, tH);
         float delta = gg * eg * p_Amount[0];
         p_Output[index + 0] = r0 + delta;
@@ -259,20 +271,24 @@ kernel void FilmGrainKernel(constant int& p_Width   [[buffer(11)]],
         p_Output[index + 3] = a0;
     } else {
         float in[3] = { r0, g0, b0 };
-        // Shared luminance grain (cross-color correlated) + independent per-channel.
         float wc = sqrt(p_Coupling), wi = sqrt(1.0f - p_Coupling);
-        float common = 0.0f;
-        if (p_Coupling > 0.0f) {
-            float luma = r0 * 0.2126f + g0 * 0.7152f + b0 * 0.0722f;
-            float clL = clamp(luma, 0.0f, 1.0f);
-            common = grainFluct(clL, px, py, 6, p_Radius[1], p_SigmaR[1], p_NSamples, p_Seed, p_Structure);
+        float luma = r0 * 0.2126f + g0 * 0.7152f + b0 * 0.0722f;
+        float clL = clamp(luma, 0.0f, 1.0f);
+        float nf[3] = { 0.0f, 0.0f, 0.0f };
+        for (int s = 0; s < nSeeds; ++s) {
+            float common = (p_Coupling > 0.0f)
+                ? grainFluct(clL, px, py, 6, p_Radius[1], p_SigmaR[1], p_NSamples, seeds[s], p_Structure) : 0.0f;
+            for (int c = 0; c < 3; ++c) {
+                float cl = clamp(in[c], 0.0f, 1.0f);
+                float indep = (p_Coupling < 1.0f)
+                    ? grainFluct(cl, px, py, c, p_Radius[c], p_SigmaR[c], p_NSamples, seeds[s], p_Structure) : 0.0f;
+                nf[c] += wts[s] * (wc * common + wi * indep);
+            }
         }
         for (int c = 0; c < 3; ++c) {
             float cl = clamp(in[c], 0.0f, 1.0f);
-            float indep = (p_Coupling < 1.0f) ? grainFluct(cl, px, py, c, p_Radius[c], p_SigmaR[c], p_NSamples, p_Seed, p_Structure) : 0.0f;
-            float nf = wc * common + wi * indep;
             float eg = effectiveGain(p_GainLUT, p_LUTSize, cl, p_MatchCurve, p_FlatScale, tS, tM, tH);
-            p_Output[index + c] = in[c] + nf * eg * p_Amount[c];
+            p_Output[index + c] = in[c] + nf[c] * eg * p_Amount[c];
         }
         p_Output[index + 3] = a0;
     }
@@ -300,7 +316,7 @@ static id<MTLComputePipelineState> buildPipe(id<MTLLibrary> lib, id<MTLDevice> d
 
 void RunFilmGrainMetal(void* p_CmdQ, int p_Width, int p_Height, int p_OffX, int p_OffY,
                        const float* p_Radius, const float* p_SigmaR, const float* p_Amount,
-                       int p_NSamples, unsigned int p_Seed, int p_Mono,
+                       int p_NSamples, unsigned int p_SeedStatic, unsigned int p_SeedMoving, float p_Motion, int p_Mono,
                        int p_MatchCurve, const float* p_GainLUT, int p_LUTSize, float p_FlatScale,
                        const float* p_Trim, float p_Structure, float p_Coupling,
                        float p_HalIntensity, const float* p_HalTint, float p_HalSigma, float p_HalThreshold,
@@ -410,7 +426,7 @@ void RunFilmGrainMetal(void* p_CmdQ, int p_Width, int p_Height, int p_OffX, int 
     [enc setBytes:p_SigmaR    length:sizeof(float) * 3 atIndex:16];
     [enc setBytes:p_Amount    length:sizeof(float) * 3 atIndex:17];
     [enc setBytes:&p_NSamples length:sizeof(int) atIndex:18];
-    [enc setBytes:&p_Seed     length:sizeof(unsigned int) atIndex:19];
+    [enc setBytes:&p_SeedStatic length:sizeof(unsigned int) atIndex:19];
     [enc setBytes:&p_Mono     length:sizeof(int) atIndex:20];
     [enc setBytes:&p_MatchCurve length:sizeof(int) atIndex:21];
     [enc setBytes:p_GainLUT   length:sizeof(float) * p_LUTSize atIndex:22];
@@ -423,6 +439,8 @@ void RunFilmGrainMetal(void* p_CmdQ, int p_Width, int p_Height, int p_OffX, int 
     float halI = doHal ? p_HalIntensity : 0.0f;
     [enc setBytes:&halI length:sizeof(float) atIndex:29];
     [enc setBytes:p_HalTint length:sizeof(float) * 3 atIndex:30];
+    [enc setBytes:&p_SeedMoving length:sizeof(unsigned int) atIndex:9];
+    [enc setBytes:&p_Motion length:sizeof(float) atIndex:10];
     [enc dispatchThreadgroups:tg threadsPerThreadgroup:tgc];
     [enc endEncoding];
 

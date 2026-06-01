@@ -63,7 +63,9 @@ Structure* octave), and a near-Gaussian PDF (the soft shot-noise sum).
 | **Quality** | Anti-alias supersampling (default 1). Raise to 4–9 only if very fine grain looks aliased. |
 | **Monochrome Grain** | One luminance grain layer for all channels (less chroma noise). |
 | **Color Coupling** | How correlated grain is across R/G/B (0 = independent RGB = most chroma noise, 1 = monochrome-like). ~0.75 is film-like; real grain is highly cross-color correlated. |
-| **Animate** | Reseed grain each frame (running-film shimmer) vs. static plate. |
+| **Animate** | Master switch for grain movement (off = static plate). |
+| **Motion Amount** | 0 = static plate, 1 = fully re-randomized each frame; between = partial 'boil' (static base + moving overlay). |
+| **Frame Hold** | Hold each grain pattern N frames: 1 = on ones, 2 = on twos, 3 = on threes (film cadence). |
 | **Seed** | Base random seed. |
 | **Tonal Grain Trim** | Shadow / Mid / Highlight grain multipliers, blended smoothly across the tonal range. |
 | **Per-Channel (RGB)** | Independent strength & size multipliers per channel. |

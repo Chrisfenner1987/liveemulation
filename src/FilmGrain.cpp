@@ -103,7 +103,7 @@ public:
 
     void setSrcImg(OFX::Image* p_SrcImg) { _srcImg = p_SrcImg; }
     void setParams(const float radius[3], const float sigmaR[3], const float amount[3],
-                   int nSamples, unsigned int seed, bool monochrome,
+                   int nSamples, unsigned int seedStatic, unsigned int seedMoving, float motion, bool monochrome,
                    bool matchCurve, float trimS, float trimM, float trimH, float structure, float coupling);
     void setHalation(float intensity, const float tint[3], float sigma, float threshold, float hiGain) {
         _halIntensity = intensity; _halSigma = sigma; _halThresh = threshold; _halGain = hiGain;
@@ -123,7 +123,9 @@ private:
     float _sigmaR[3] = {0, 0, 0};
     float _amount[3] = {1, 1, 1};
     int   _nSamples = 64;
-    unsigned int _seed = 2026u;
+    unsigned int _seedStatic = 2026u;   // pattern when not moving (frame 0)
+    unsigned int _seedMoving = 2026u;    // pattern for the current (held) frame
+    float _motion = 1.0f;                // 0 = static plate, 1 = full per-frame movement
     bool  _monochrome = false;
     bool  _matchCurve = true;
     float _trimS = 1.0f, _trimM = 1.0f, _trimH = 1.0f;
@@ -183,11 +185,11 @@ FilmGrainProcessor::FilmGrainProcessor(OFX::ImageEffect& p_Instance)
     : OFX::ImageProcessor(p_Instance) {}
 
 void FilmGrainProcessor::setParams(const float radius[3], const float sigmaR[3], const float amount[3],
-                                   int nSamples, unsigned int seed, bool monochrome,
+                                   int nSamples, unsigned int seedStatic, unsigned int seedMoving, float motion, bool monochrome,
                                    bool matchCurve, float trimS, float trimM, float trimH, float structure, float coupling) {
     for (int c = 0; c < 3; ++c) { _radius[c] = radius[c]; _sigmaR[c] = sigmaR[c]; _amount[c] = amount[c]; }
     _nSamples = nSamples;
-    _seed = seed;
+    _seedStatic = seedStatic; _seedMoving = seedMoving; _motion = motion;
     _monochrome = monochrome;
     _matchCurve = matchCurve;
     _trimS = trimS; _trimM = trimM; _trimH = trimH;
@@ -198,7 +200,7 @@ void FilmGrainProcessor::setParams(const float radius[3], const float sigmaR[3],
 #ifdef __APPLE__
 extern void RunFilmGrainMetal(void* p_CmdQ, int p_Width, int p_Height, int p_OffX, int p_OffY,
                               const float* p_Radius, const float* p_SigmaR, const float* p_Amount,
-                              int p_NSamples, unsigned int p_Seed, int p_Mono,
+                              int p_NSamples, unsigned int p_SeedStatic, unsigned int p_SeedMoving, float p_Motion, int p_Mono,
                               int p_MatchCurve, const float* p_GainLUT, int p_LUTSize, float p_FlatScale,
                               const float* p_Trim, float p_Structure, float p_Coupling,
                               float p_HalIntensity, const float* p_HalTint, float p_HalSigma, float p_HalThreshold,
@@ -216,7 +218,7 @@ void FilmGrainProcessor::processImagesMetal() {
 
     float trim[3] = { _trimS, _trimM, _trimH };
     RunFilmGrainMetal(_pMetalCmdQ, width, height, bounds.x1, bounds.y1,
-                      _radius, _sigmaR, _amount, _nSamples, _seed, _monochrome ? 1 : 0,
+                      _radius, _sigmaR, _amount, _nSamples, _seedStatic, _seedMoving, _motion, _monochrome ? 1 : 0,
                       _matchCurve ? 1 : 0, kGainLUT, kGainLUTSize, kGainFlatScale, trim,
                       _structure, _coupling,
                       _halIntensity, _halTint, _halSigma, _halThresh,
@@ -236,7 +238,7 @@ void FilmGrainProcessor::processImagesCuda() {
     P.r0 = _radius[0]; P.r1 = _radius[1]; P.r2 = _radius[2];
     P.s0 = _sigmaR[0]; P.s1 = _sigmaR[1]; P.s2 = _sigmaR[2];
     P.a0 = _amount[0]; P.a1 = _amount[1]; P.a2 = _amount[2];
-    P.nSamples = _nSamples; P.seed = _seed; P.mono = _monochrome ? 1 : 0;
+    P.nSamples = _nSamples; P.seedStatic = _seedStatic; P.seedMoving = _seedMoving; P.motion = _motion; P.mono = _monochrome ? 1 : 0;
     P.matchCurve = _matchCurve ? 1 : 0; P.flatScale = kGainFlatScale;
     P.trimS = _trimS; P.trimM = _trimM; P.trimH = _trimH;
     P.structure = _structure; P.coupling = _coupling;
@@ -273,41 +275,57 @@ void FilmGrainProcessor::multiThreadProcessImages(OfxRectI p_ProcWindow) {
                     }
                 }
 
+                // Grain Motion: blend a static-seed pattern (frame 0) and the
+                // moving-seed pattern (current held frame). sqrt-weighting keeps
+                // unit variance. nSeeds==1 at motion 0 or 1 -> no extra cost.
+                unsigned int seeds[2]; float wts[2]; int nSeeds;
+                if (_motion <= 0.0f)      { nSeeds = 1; seeds[0] = _seedStatic; wts[0] = 1.0f; }
+                else if (_motion >= 1.0f) { nSeeds = 1; seeds[0] = _seedMoving; wts[0] = 1.0f; }
+                else { nSeeds = 2; seeds[0] = _seedStatic; wts[0] = std::sqrt(1.0f - _motion * _motion);
+                                   seeds[1] = _seedMoving; wts[1] = _motion; }
+
                 if (_monochrome) {
                     float luma = base[0] * kLumaR + base[1] * kLumaG + base[2] * kLumaB;
                     float cl = luma < 0 ? 0 : (luma > 1 ? 1 : luma);
-                    grain::Params p; p.grainRadius = _radius[0]; p.sigmaR = _sigmaR[0];
-                    p.nSamples = _nSamples; p.seed = _seed;
-                    float g = grainFluct(cl, x, y, 0, p, _structure);
+                    float g = 0.0f;
+                    for (int s = 0; s < nSeeds; ++s) {
+                        grain::Params p; p.grainRadius = _radius[0]; p.sigmaR = _sigmaR[0];
+                        p.nSamples = _nSamples; p.seed = seeds[s];
+                        g += wts[s] * grainFluct(cl, x, y, 0, p, _structure);
+                    }
                     float eg = effectiveGain(cl, _matchCurve, _trimS, _trimM, _trimH);
                     float delta = g * eg * _amount[0];
                     for (int c = 0; c < 3; ++c) dstPix[c] = base[c] + delta;
                     dstPix[3] = base[3];
                 } else {
                     // Shared luminance grain (correlated across channels) + independent
-                    // per-channel grain, mixed sqrt(coupling)*common + sqrt(1-coupling)*indep
-                    // (unit variance). Real film grain is highly cross-color correlated.
+                    // per-channel grain, mixed sqrt(coupling)*common + sqrt(1-coupling)*indep.
                     float wc = std::sqrt(_coupling), wi = std::sqrt(1.0f - _coupling);
-                    float common = 0.0f;
-                    if (_coupling > 0.0f) {
-                        float luma = base[0] * kLumaR + base[1] * kLumaG + base[2] * kLumaB;
-                        float clL = luma < 0 ? 0 : (luma > 1 ? 1 : luma);
-                        grain::Params pc; pc.grainRadius = _radius[1]; pc.sigmaR = _sigmaR[1];
-                        pc.nSamples = _nSamples; pc.seed = _seed;
-                        common = grainFluct(clL, x, y, 6, pc, _structure);
+                    float luma = base[0] * kLumaR + base[1] * kLumaG + base[2] * kLumaB;
+                    float clL = luma < 0 ? 0 : (luma > 1 ? 1 : luma);
+                    float nf[3] = {0, 0, 0};
+                    for (int s = 0; s < nSeeds; ++s) {
+                        float common = 0.0f;
+                        if (_coupling > 0.0f) {
+                            grain::Params pc; pc.grainRadius = _radius[1]; pc.sigmaR = _sigmaR[1];
+                            pc.nSamples = _nSamples; pc.seed = seeds[s];
+                            common = grainFluct(clL, x, y, 6, pc, _structure);
+                        }
+                        for (int c = 0; c < 3; ++c) {
+                            float cl = base[c] < 0 ? 0 : (base[c] > 1 ? 1 : base[c]);
+                            float indep = 0.0f;
+                            if (_coupling < 1.0f) {
+                                grain::Params p; p.grainRadius = _radius[c]; p.sigmaR = _sigmaR[c];
+                                p.nSamples = _nSamples; p.seed = seeds[s];
+                                indep = grainFluct(cl, x, y, c, p, _structure);
+                            }
+                            nf[c] += wts[s] * (wc * common + wi * indep);
+                        }
                     }
                     for (int c = 0; c < 3; ++c) {
-                        float in = base[c];
-                        float cl = in < 0 ? 0 : (in > 1 ? 1 : in);
-                        float indep = 0.0f;
-                        if (_coupling < 1.0f) {
-                            grain::Params p; p.grainRadius = _radius[c]; p.sigmaR = _sigmaR[c];
-                            p.nSamples = _nSamples; p.seed = _seed;
-                            indep = grainFluct(cl, x, y, c, p, _structure);
-                        }
-                        float nf = wc * common + wi * indep;
+                        float cl = base[c] < 0 ? 0 : (base[c] > 1 ? 1 : base[c]);
                         float eg = effectiveGain(cl, _matchCurve, _trimS, _trimM, _trimH);
-                        dstPix[c] = in + nf * eg * _amount[c];
+                        dstPix[c] = base[c] + nf[c] * eg * _amount[c];
                     }
                     dstPix[3] = base[3];
                 }
@@ -344,6 +362,8 @@ private:
     OFX::IntParam*     m_Quality;
     OFX::BooleanParam* m_Monochrome;
     OFX::BooleanParam* m_Animate;
+    OFX::DoubleParam*  m_Motion;
+    OFX::IntParam*     m_FrameHold;
     OFX::IntParam*     m_Seed;
     OFX::BooleanParam* m_MatchCurve;
     OFX::DoubleParam*  m_TrimS; OFX::DoubleParam* m_TrimM; OFX::DoubleParam* m_TrimH;
@@ -370,6 +390,8 @@ FilmGrainPlugin::FilmGrainPlugin(OfxImageEffectHandle p_Handle)
     m_Quality      = fetchIntParam("quality");
     m_Monochrome   = fetchBooleanParam("monochrome");
     m_Animate      = fetchBooleanParam("animate");
+    m_Motion       = fetchDoubleParam("motionAmount");
+    m_FrameHold    = fetchIntParam("frameHold");
     m_Seed         = fetchIntParam("seed");
     m_MatchCurve   = fetchBooleanParam("matchCurve");
     m_TrimS = fetchDoubleParam("trimShadow"); m_TrimM = fetchDoubleParam("trimMid"); m_TrimH = fetchDoubleParam("trimHigh");
@@ -446,6 +468,8 @@ void FilmGrainPlugin::setupAndProcess(FilmGrainProcessor& p_Proc, const OFX::Ren
     const bool   mono    = m_Monochrome->getValueAtTime(t);
     const bool   animate = m_Animate->getValueAtTime(t);
     const int    seedBase= m_Seed->getValueAtTime(t);
+    const int    frameHold = m_FrameHold->getValueAtTime(t);
+    const float  motionAmt = (float)m_Motion->getValueAtTime(t);
     const bool   matchCurve = m_MatchCurve->getValueAtTime(t);
     const float  trimS = (float)m_TrimS->getValueAtTime(t);
     const float  trimM = (float)m_TrimM->getValueAtTime(t);
@@ -475,8 +499,15 @@ void FilmGrainPlugin::setupAndProcess(FilmGrainProcessor& p_Proc, const OFX::Ren
         amt[0] = (float)(amount * aR); amt[1] = (float)(amount * aG); amt[2] = (float)(amount * aB);
     }
 
-    unsigned int frame = animate ? (unsigned int)((int)std::lround(t)) : 0u;
-    unsigned int seed = (unsigned int)seedBase * 2654435761u + frame * 40503u + 1u;
+    // Frame Hold (#2): grain pattern updates every N frames (1 = on ones, 2 = on twos...).
+    int hold = frameHold < 1 ? 1 : frameHold;
+    int frameIdx = (int)std::floor(t / (double)hold);
+    // Distinct constant so the static pattern never coincides with a moving frame
+    // (else the static+moving blend would double-count and over-strengthen grain).
+    unsigned int seedStatic = (unsigned int)seedBase * 2654435761u + 0x9e3779b9u;
+    unsigned int seedMoving = (unsigned int)seedBase * 2654435761u + (unsigned int)frameIdx * 40503u + 1u;
+    // Motion Amount (#3): 0 = static plate, 1 = full per-frame movement. Animate off forces static.
+    float motion = animate ? (motionAmt < 0 ? 0.0f : (motionAmt > 1 ? 1.0f : motionAmt)) : 0.0f;
 
     // Halation blur radius (sigma) in screen pixels, scaled for proxy.
     const float halSigma = (float)(m_HalSize->getValueAtTime(t) * rs);
@@ -485,7 +516,7 @@ void FilmGrainPlugin::setupAndProcess(FilmGrainProcessor& p_Proc, const OFX::Ren
     p_Proc.setSrcImg(src.get());
     p_Proc.setGPURenderArgs(p_Args);
     p_Proc.setRenderWindow(p_Args.renderWindow);
-    p_Proc.setParams(radius, sigmaR, amt, quality < 1 ? 1 : quality, seed, mono,
+    p_Proc.setParams(radius, sigmaR, amt, quality < 1 ? 1 : quality, seedStatic, seedMoving, motion, mono,
                      matchCurve, trimS, trimM, trimH, structure, coupling);
     p_Proc.setHalation(halIntensity, halTint, halSigma, halThreshold, halGain);
     p_Proc.prepareHalationCPU();   // builds the CPU halo only on the CPU path
@@ -652,9 +683,23 @@ void FilmGrainFactory::describeInContext(OFX::ImageEffectDescriptor& p_Desc, OFX
 
     BooleanParamDescriptor* animate = p_Desc.defineBooleanParam("animate");
     animate->setLabels("Animate", "Animate", "Animate");
-    animate->setHint("Reseed the grain every frame so it shimmers like real running film. Off = static grain plate.");
+    animate->setHint("Master switch for grain movement. Off = static grain plate (Motion Amount / Frame Hold ignored).");
     animate->setDefault(true);
     page->addChild(*animate);
+
+    DoubleParamDescriptor* motion = defineDouble(p_Desc, "motionAmount", "Motion Amount",
+        "How much the grain moves frame to frame: 0 = static plate, 1 = fully re-randomized each (held) frame. "
+        "Values between blend a static base with moving grain for a calmer 'boil'. (Animate must be on.)",
+        1.0, 0.0, 1.0, 0.0, 1.0, nullptr);
+    page->addChild(*motion);
+
+    IntParamDescriptor* frameHold = p_Desc.defineIntParam("frameHold");
+    frameHold->setLabels("Frame Hold", "Frame Hold", "Frame Hold");
+    frameHold->setHint("Hold each grain pattern for N frames before it changes. 1 = new grain every frame (on ones); 2 = on twos; 3 = on threes (classic film cadence).");
+    frameHold->setDefault(1);
+    frameHold->setRange(1, 24);
+    frameHold->setDisplayRange(1, 6);
+    page->addChild(*frameHold);
 
     IntParamDescriptor* seed = p_Desc.defineIntParam("seed");
     seed->setLabels("Seed", "Seed", "Seed");

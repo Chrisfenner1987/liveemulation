@@ -9,7 +9,8 @@ struct FGCudaParams {
     float s0, s1, s2;          // per-channel sigmaR (irregularity)
     float a0, a1, a2;          // per-channel effective amount
     int nSamples;
-    unsigned int seed;
+    unsigned int seedStatic, seedMoving;   // frame-0 pattern, current-frame pattern
+    float motion;                          // 0 = static, 1 = full movement
     int mono;
     int matchCurve;
     float flatScale;

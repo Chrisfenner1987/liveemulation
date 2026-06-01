@@ -58,10 +58,19 @@ __global__ void FilmGrainKernelCuda(FGCudaParams P, int lutSize, const float* ha
     float sig[3]    = { P.s0, P.s1, P.s2 };
     float amt[3]    = { P.a0, P.a1, P.a2 };
 
+    // Grain Motion: blend a static-seed pattern and the moving-seed pattern.
+    unsigned int seeds[2]; float wts[2]; int nSeeds;
+    if (P.motion <= 0.0f)      { nSeeds = 1; seeds[0] = P.seedStatic; wts[0] = 1.0f; }
+    else if (P.motion >= 1.0f) { nSeeds = 1; seeds[0] = P.seedMoving; wts[0] = 1.0f; }
+    else { nSeeds = 2; seeds[0] = P.seedStatic; wts[0] = sqrtf(1.0f - P.motion * P.motion);
+                       seeds[1] = P.seedMoving; wts[1] = P.motion; }
+
     if (P.mono) {
         float luma = r0 * 0.2126f + g0 * 0.7152f + b0 * 0.0722f;
         float cl = fg_clamp(luma, 0.0f, 1.0f);
-        float gg = grainFluctDev(cl, px, py, 0, radius[0], sig[0], P.nSamples, P.seed, P.structure);
+        float gg = 0.0f;
+        for (int s = 0; s < nSeeds; ++s)
+            gg += wts[s] * grainFluctDev(cl, px, py, 0, radius[0], sig[0], P.nSamples, seeds[s], P.structure);
         float eg = effectiveGainDev(lutSize, cl, P.matchCurve, P.flatScale, P.trimS, P.trimM, P.trimH);
         float delta = gg * eg * amt[0];
         output[index] = r0 + delta; output[index + 1] = g0 + delta; output[index + 2] = b0 + delta;
@@ -69,18 +78,23 @@ __global__ void FilmGrainKernelCuda(FGCudaParams P, int lutSize, const float* ha
     } else {
         float in3[3] = { r0, g0, b0 };
         float wc = sqrtf(P.coupling), wi = sqrtf(1.0f - P.coupling);
-        float common = 0.0f;
-        if (P.coupling > 0.0f) {
-            float luma = r0 * 0.2126f + g0 * 0.7152f + b0 * 0.0722f;
-            float clL = fg_clamp(luma, 0.0f, 1.0f);
-            common = grainFluctDev(clL, px, py, 6, radius[1], sig[1], P.nSamples, P.seed, P.structure);
+        float luma = r0 * 0.2126f + g0 * 0.7152f + b0 * 0.0722f;
+        float clL = fg_clamp(luma, 0.0f, 1.0f);
+        float nf[3] = { 0.0f, 0.0f, 0.0f };
+        for (int s = 0; s < nSeeds; ++s) {
+            float common = (P.coupling > 0.0f)
+                ? grainFluctDev(clL, px, py, 6, radius[1], sig[1], P.nSamples, seeds[s], P.structure) : 0.0f;
+            for (int c = 0; c < 3; ++c) {
+                float cl = fg_clamp(in3[c], 0.0f, 1.0f);
+                float indep = (P.coupling < 1.0f)
+                    ? grainFluctDev(cl, px, py, c, radius[c], sig[c], P.nSamples, seeds[s], P.structure) : 0.0f;
+                nf[c] += wts[s] * (wc * common + wi * indep);
+            }
         }
         for (int c = 0; c < 3; ++c) {
             float cl = fg_clamp(in3[c], 0.0f, 1.0f);
-            float indep = (P.coupling < 1.0f) ? grainFluctDev(cl, px, py, c, radius[c], sig[c], P.nSamples, P.seed, P.structure) : 0.0f;
-            float nf = wc * common + wi * indep;
             float eg = effectiveGainDev(lutSize, cl, P.matchCurve, P.flatScale, P.trimS, P.trimM, P.trimH);
-            output[index + c] = in3[c] + nf * eg * amt[c];
+            output[index + c] = in3[c] + nf[c] * eg * amt[c];
         }
         output[index + 3] = a0;
     }
